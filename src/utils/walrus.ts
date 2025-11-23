@@ -5,7 +5,7 @@
 import { IntenusWalrusClient } from "@intenus/walrus";
 import { config } from "../config";
 import { IGSIntent, IGSIntentSchema, IGSSolution, IGSSolutionSchema } from "@intenus/common";
-import { SwapIntent } from "../types/intent";
+import { IntenusSealClient, decryptIntentData } from "@intenus/seal";
 
 // Initialize Walrus client
 let walrusClient: IntenusWalrusClient | null = null;
@@ -19,25 +19,37 @@ function getWalrusClient(): IntenusWalrusClient {
   return walrusClient;
 }
 
+// Initialize SEAL client
+let sealClient: IntenusSealClient | null = null;
+
+function getSealClient(): IntenusSealClient {
+  if (!sealClient) {
+    sealClient = new IntenusSealClient({
+      network: config.sui.network as "testnet" | "mainnet",
+    });
+  }
+  return sealClient;
+}
+
 /**
- * Parsed intent format for the solver
+ * Simple intent format expected by the solver
  */
-export interface ParsedIntent {
-  type: string;
+export interface SimpleIntentFormat {
+  type?: string;
   tokenIn: string;
   tokenOut: string;
   amountIn: string;
   minAmountOut: string;
   slippage: number;
-  deadline: number;
-  userAddress: string;
+  deadline?: number;
+  user_address: string;
 }
 
 /**
  * Parse IGS Intent to simple swap format
  * Converts IGS (Intenus General Standard) format to our solver's expected format
  */
-export function parseIGSIntent(igsIntent: IGSIntent): ParsedIntent {
+function parseIGSIntent(igsIntent: IGSIntent): SimpleIntentFormat {
   const input = igsIntent.operation.inputs[0];
   const output = igsIntent.operation.outputs[0];
 
@@ -68,60 +80,59 @@ export function parseIGSIntent(igsIntent: IGSIntent): ParsedIntent {
     minAmountOut,
     slippage,
     deadline,
-    userAddress: igsIntent.user_address,
+    user_address: igsIntent.user_address,
   };
 }
 
 /**
- * Convert IGS Intent to SwapIntent format
- * @param igsIntent - The IGS intent to convert
- * @param intentId - The intent ID
- * @param submitter - The submitter address
- * @param blobId - The blob ID
- * @returns SwapIntent object for the solver
- */
-export function convertIGSToSwapIntent(
-  igsIntent: IGSIntent,
-  intentId: string,
-  submitter: string,
-  blobId: string
-): SwapIntent {
-  const parsedIntent = parseIGSIntent(igsIntent);
-
-  return {
-    intentId,
-    submitter,
-    blobId,
-    tokenIn: parsedIntent.tokenIn,
-    tokenOut: parsedIntent.tokenOut,
-    amountIn: parsedIntent.amountIn,
-    minAmountOut: parsedIntent.minAmountOut,
-    slippage: parsedIntent.slippage,
-    deadline: parsedIntent.deadline,
-  };
-}
-
-/**
- * Fetch intent data from Walrus storage
+ * Fetch intent data from Walrus storage with SEAL decryption
  * @param blobId - The blob ID to fetch
- * @returns The decoded IGS intent data
+ * @param intentId - The intent ID for SEAL decryption (optional, required for encrypted intents)
+ * @returns The decoded intent data in simple format
  */
-export async function fetchIntentFromWalrus(blobId: string): Promise<IGSIntent | null> {
+export async function fetchIntentFromWalrus(blobId: string, intentId?: string): Promise<SimpleIntentFormat | null> {
   try {
     const client = getWalrusClient();
-    if(blobId!=="xS44PnntMps4La_G8rBXbV4jZ-FfYC1bfdkWWF_j_7M") return null;
-    
-    const blobData = await client.intents.fetch(blobId);
+    if(blobId!=="0d3TbaEfYxKmqKKLrkh4G6p6NCQs9R-6v1mFP872sB8") return null;
+    let blobData = await client.intents.fetch(blobId);
 
     if (!blobData) {
       throw new Error("Blob not found");
     }
 
+    // Try to decrypt with SEAL if intentId is provided
+    if (intentId) {
+      try {
+        console.log(`Attempting to decrypt intent ${intentId} with SEAL...`);
+        const sealClientInstance = getSealClient();
+
+        // Check if blobData is encrypted (it would be a Uint8Array)
+        if (blobData instanceof Uint8Array) {
+          const decryptedData = await decryptIntentData(
+            sealClientInstance,
+            blobData,
+            intentId,
+            config.signer
+          );
+          blobData = decryptedData;
+          console.log(`Successfully decrypted intent ${intentId} with SEAL`);
+        } else {
+          console.log(`Intent ${intentId} is not encrypted, using raw data`);
+        }
+      } catch (decryptError) {
+        console.warn(`SEAL decryption failed for intent ${intentId}, falling back to non-encrypted data:`, decryptError);
+        // Continue with original blobData (fallback)
+      }
+    }
+
     const intentData = IGSIntentSchema.parse(blobData);
 
-    console.log("Received intent data:", intentData);
-
-    return intentData;
+    if (intentData.igs_version) {
+      return parseIGSIntent(intentData as IGSIntent);
+    } else {
+      // If not IGS format, assume it's already in simple format
+      return intentData as unknown as SimpleIntentFormat;
+    }
   } catch (error) {
     console.error("Error fetching from Walrus:", error);
     throw error;

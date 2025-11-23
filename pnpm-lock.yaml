@@ -23,6 +23,9 @@ importers:
       '@intenus/common':
         specifier: ^2.4.4
         version: 2.4.4(typescript@5.9.3)
+      '@intenus/seal':
+        specifier: ^2.4.0
+        version: 2.4.0(@mysten/seal@0.9.4(typescript@5.9.3))(@mysten/sui@1.45.0(typescript@5.9.3))(typescript@5.9.3)
       '@intenus/solver-sdk':
         specifier: ^2.3.1
         version: 2.3.1(@mysten/seal@0.9.4(typescript@5.9.3))(@mysten/walrus@0.8.4(typescript@5.9.3))(typescript@5.9.3)
@@ -142,6 +145,12 @@ packages:
 
   '@intenus/common@2.4.4':
     resolution: {integrity: sha512-zlNyDDe0c2nAkCIhcFKOisfQxzcJJD1I0+O2GVJQzUTN14y6fV2IM/7dbLICIKRMf+Uz2tTPFjBTkn/2U2Be2Q==}
+
+  '@intenus/seal@2.4.0':
+    resolution: {integrity: sha512-Dy6lMkVpQZzXwSy4gCiXwjTlW9qZa2RGXPocfDmbczz35B3JKnnjNOP0dK8iB/lWY71JbbqKnZRVUWXTs7EcNA==}
+    peerDependencies:
+      '@mysten/seal': ^0.9.3
+      '@mysten/sui': ^1.44.0
 
   '@intenus/solver-sdk@2.3.1':
     resolution: {integrity: sha512-ii2jm4RpbHwlUNKOCMqHQK3CYl5nfrEiiE3rnw+uQLvligvFRSZd3gs+wRXLMD9MuE+Ej3mqWE5jttT4+9gb1Q==}
@@ -972,6 +981,16 @@ snapshots:
       ajv: 8.17.1
       ajv-formats: 2.1.1(ajv@8.17.1)
       zod: 4.1.12
+    transitivePeerDependencies:
+      - '@gql.tada/svelte-support'
+      - '@gql.tada/vue-support'
+      - typescript
+
+  '@intenus/seal@2.4.0(@mysten/seal@0.9.4(typescript@5.9.3))(@mysten/sui@1.45.0(typescript@5.9.3))(typescript@5.9.3)':
+    dependencies:
+      '@intenus/common': 2.4.4(typescript@5.9.3)
+      '@mysten/seal': 0.9.4(typescript@5.9.3)
+      '@mysten/sui': 1.45.0(typescript@5.9.3)
     transitivePeerDependencies:
       - '@gql.tada/svelte-support'
       - '@gql.tada/vue-support'
