@@ -4,7 +4,7 @@
 
 import { IntenusWalrusClient } from "@intenus/walrus";
 import { config } from "../config";
-import { IGSSolution, IGSSolutionSchema } from "@intenus/common";
+import { IGSIntentSchema, IGSSolution, IGSSolutionSchema } from "@intenus/common";
 
 // Initialize Walrus client
 let walrusClient: IntenusWalrusClient | null = null;
@@ -38,14 +38,7 @@ export async function fetchIntentFromWalrus(blobId: string): Promise<any> {
 
     // Parse the intent data
     // The intent should be in a standard format
-    const intentData = JSON.parse(blobData.toString());
-
-    console.log(`✅ Successfully fetched intent data:`, {
-      type: intentData.type,
-      tokenIn: intentData.tokenIn,
-      tokenOut: intentData.tokenOut,
-      amountIn: intentData.amountIn,
-    });
+    const intentData = IGSIntentSchema.parse(blobData);
 
     return intentData;
   } catch (error) {
