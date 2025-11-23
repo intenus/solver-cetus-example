@@ -1,7 +1,7 @@
 import { IGSSolution } from '@intenus/common';
 import { config } from '../config';
 import { IntentSubmittedEvent, SwapIntent } from '../types/intent';
-import { fetchIntentFromWalrus } from '../utils/walrus';
+import { fetchIntentFromWalrus, convertIGSToSwapIntent } from '../utils/walrus';
 import { CetusService } from './cetusService';
 import { SolutionService } from './solutionService';
 
@@ -29,39 +29,25 @@ export class SimpleSolver {
     }
 
     try {
-      const intentData = await fetchIntentFromWalrus(event.parsedJson.blob_id);
-      const submitter = intentData?.user_address || event.parsedJson.submitter;
+      const igsIntent = await fetchIntentFromWalrus(event.parsedJson.blob_id);
+
+      if (!igsIntent) {
+        return;
+      }
+
+      const submitter = igsIntent.user_address || event.parsedJson.submitter;
 
       if (!submitter) {
         throw new Error('User address is required');
       }
 
-      if(!intentData) {
-        return;
-      }
-
-      // If intentData does not follow IGS spec, return early or throw
-      if (
-        !intentData.tokenIn ||
-        !intentData.tokenOut ||
-        !intentData.amountIn ||
-        !intentData.minAmountOut ||
-        !intentData.slippage
-      ) {
-        console.error('Intent data does not follow IGS spec:', intentData);
-        return;
-      }
-
-      const swapIntent: SwapIntent = {
+      // Convert IGS intent to SwapIntent format
+      const swapIntent = convertIGSToSwapIntent(
+        igsIntent,
         intentId,
         submitter,
-        blobId: event.parsedJson.blob_id,
-        tokenIn: intentData.tokenIn,
-        tokenOut: intentData.tokenOut,
-        amountIn: intentData.amountIn,
-        minAmountOut: intentData.minAmountOut,
-        slippage: intentData.slippage,
-      };
+        event.parsedJson.blob_id
+      );
 
       const solution = await this.findBestRoute(swapIntent);
 

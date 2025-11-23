@@ -5,6 +5,7 @@
 import { IntenusWalrusClient } from "@intenus/walrus";
 import { config } from "../config";
 import { IGSIntent, IGSIntentSchema, IGSSolution, IGSSolutionSchema } from "@intenus/common";
+import { SwapIntent } from "../types/intent";
 
 // Initialize Walrus client
 let walrusClient: IntenusWalrusClient | null = null;
@@ -19,10 +20,24 @@ function getWalrusClient(): IntenusWalrusClient {
 }
 
 /**
+ * Parsed intent format for the solver
+ */
+export interface ParsedIntent {
+  type: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  minAmountOut: string;
+  slippage: number;
+  deadline: number;
+  userAddress: string;
+}
+
+/**
  * Parse IGS Intent to simple swap format
  * Converts IGS (Intenus General Standard) format to our solver's expected format
  */
-function parseIGSIntent(igsIntent: IGSIntent): any {
+export function parseIGSIntent(igsIntent: IGSIntent): ParsedIntent {
   const input = igsIntent.operation.inputs[0];
   const output = igsIntent.operation.outputs[0];
 
@@ -58,27 +73,55 @@ function parseIGSIntent(igsIntent: IGSIntent): any {
 }
 
 /**
+ * Convert IGS Intent to SwapIntent format
+ * @param igsIntent - The IGS intent to convert
+ * @param intentId - The intent ID
+ * @param submitter - The submitter address
+ * @param blobId - The blob ID
+ * @returns SwapIntent object for the solver
+ */
+export function convertIGSToSwapIntent(
+  igsIntent: IGSIntent,
+  intentId: string,
+  submitter: string,
+  blobId: string
+): SwapIntent {
+  const parsedIntent = parseIGSIntent(igsIntent);
+
+  return {
+    intentId,
+    submitter,
+    blobId,
+    tokenIn: parsedIntent.tokenIn,
+    tokenOut: parsedIntent.tokenOut,
+    amountIn: parsedIntent.amountIn,
+    minAmountOut: parsedIntent.minAmountOut,
+    slippage: parsedIntent.slippage,
+    deadline: parsedIntent.deadline,
+  };
+}
+
+/**
  * Fetch intent data from Walrus storage
  * @param blobId - The blob ID to fetch
- * @returns The decoded intent data in simple format
+ * @returns The decoded IGS intent data
  */
 export async function fetchIntentFromWalrus(blobId: string): Promise<IGSIntent | null> {
   try {
     const client = getWalrusClient();
-    if(blobId!=="0d3TbaEfYxKmqKKLrkh4G6p6NCQs9R-6v1mFP872sB8") return null;
-    const blobData = await client.intents.fetch(blobId);
+    if(blobId!=="xS44PnntMps4La_G8rBXbV4jZ-FfYC1bfdkWWF_j_7M") return null;
     
+    const blobData = await client.intents.fetch(blobId);
+
     if (!blobData) {
       throw new Error("Blob not found");
     }
 
     const intentData = IGSIntentSchema.parse(blobData);
 
-    if (intentData.igs_version) {
-      return parseIGSIntent(intentData as IGSIntent);
-    } else {
-      return intentData;
-    }
+    console.log("Received intent data:", intentData);
+
+    return intentData;
   } catch (error) {
     console.error("Error fetching from Walrus:", error);
     throw error;
