@@ -104,13 +104,9 @@ export async function fetchIntentFromWalrus(blobId: string): Promise<any> {
       // Parse IGS format
       return parseIGSIntent(intentData as IGSIntent);
     } else {
-      // Legacy simple format
-      console.log(`✅ Successfully fetched intent data (legacy format):`, {
-        type: intentData.type,
-        tokenIn: intentData.tokenIn,
-        tokenOut: intentData.tokenOut,
-        amountIn: intentData.amountIn,
-      });
+      // Legacy simple format - should not happen with IGS format
+      // This is just for backwards compatibility
+      console.log(`✅ Successfully fetched intent data (legacy format)`);
       return intentData;
     }
   } catch (error) {
