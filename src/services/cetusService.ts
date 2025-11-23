@@ -7,6 +7,7 @@ import { CetusClmmSDK } from '@cetusprotocol/sui-clmm-sdk';
 import initCetusSDK, { Percentage, adjustForSlippage, d } from '@cetusprotocol/cetus-sui-clmm-sdk';
 import { AggregatorClient } from '@cetusprotocol/aggregator-sdk';
 import { Transaction } from '@mysten/sui/transactions';
+import { SuiClient } from '@mysten/sui/client';
 import BN from 'bn.js';
 import { config } from '../config';
 import { SwapRoute } from '../types/intent';
@@ -44,9 +45,11 @@ export class CetusService {
   private lastCacheUpdate = 0;
   private readonly CACHE_TTL = 60000; // 1 minute cache
   private aggregatorClient: AggregatorClient;
+  private suiClient: SuiClient;
 
   constructor() {
     this.aggregatorClient = new AggregatorClient({});
+    this.suiClient = new SuiClient({ url: config.sui.rpcUrl });
     console.log(`Cetus Service initialized for ${config.sui.network}`);
     console.log(`Cetus CLMM Package: ${config.cetus.clmmPackageId}`);
     console.log(`Cetus Aggregator Package: ${config.cetus.aggregatorPackageId}`);
@@ -106,8 +109,12 @@ export class CetusService {
   /**
    * Build swap transaction bytes using Cetus Aggregator
    * Returns transaction bytes that can be used in solution submission
+   *
+   * IMPORTANT: The transaction is built with userAddress as sender,
+   * because the user (intent submitter) will execute this transaction, not the solver.
    */
   async buildSwapTransactionBytes(
+    userAddress: string,
     tokenIn: string,
     tokenOut: string,
     amountIn: string,
@@ -139,6 +146,11 @@ export class CetusService {
       // Build transaction
       const txb = new Transaction();
 
+      // ✅ CRITICAL: Set the user as the sender of this transaction
+      // The user (intent submitter) will execute this transaction, not the solver
+      txb.setSender(userAddress);
+      console.log(`  Setting transaction sender to user: ${userAddress}`);
+
       // If input coin object ID is provided, use it; otherwise create a placeholder
       let inputCoin: any;
       if (inputCoinObjectId) {
@@ -157,15 +169,16 @@ export class CetusService {
         slippage: slippageTolerance,
       });
 
-      // Transfer output coin to recipient (will be set by solution)
-      txb.transferObjects([targetCoin], txb.pure.address('0x0')); // Placeholder address
+      // ✅ Transfer output coin back to the user (intent submitter)
+      txb.transferObjects([targetCoin], txb.pure.address(userAddress));
+      console.log(`  Output coins will be transferred to user: ${userAddress}`);
 
       // Set gas budget
       txb.setGasBudget(10000000); // 0.01 SUI
 
-      // Serialize transaction to bytes
-      // Note: Transaction needs to be serialized properly for solution submission
-      const txBytes = txb.serialize();
+      // ✅ Build transaction bytes properly with sender set
+      // This creates proper transaction bytes that the user can execute
+      const txBytes = await txb.build({ client: this.suiClient });
 
       // Get quote for return
       const quote = await this.findBestSwapRoute(tokenIn, tokenOut, amountIn, slippageTolerance);

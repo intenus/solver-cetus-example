@@ -77,13 +77,19 @@ export class SimpleSolver {
 
   /**
    * Find the best swap route and build transaction bytes using Cetus Protocol
+   *
+   * IMPORTANT: Transaction bytes are built for the USER (intent submitter) to execute,
+   * not for the solver. The user address is set as the transaction sender.
    */
   private async findBestRoute(intent: SwapIntent): Promise<IGSSolution | null> {
     console.log('\n🔍 Finding best swap route and building transaction bytes using Cetus...');
+    console.log(`  User (intent submitter): ${intent.submitter}`);
 
     try {
-      // Build swap transaction bytes using Cetus Aggregator
+      // ✅ Build swap transaction bytes for the USER to execute
+      // Pass the user's address as the first parameter
       const swapTx = await this.cetusService.buildSwapTransactionBytes(
+        intent.submitter,  // User address - they will execute this transaction
         intent.tokenIn,
         intent.tokenOut,
         intent.amountIn,

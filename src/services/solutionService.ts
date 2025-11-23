@@ -6,7 +6,6 @@
 import { SuiClient } from '@mysten/sui/client';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Transaction } from '@mysten/sui/transactions';
-import { IntenusProtocolClient } from '@intenus/client-sdk';
 import { IGSSolution } from '@intenus/common';
 import { config } from '../config';
 import { storeSolutionToWalrus } from '../utils/walrus';
@@ -17,7 +16,6 @@ import { storeSolutionToWalrus } from '../utils/walrus';
 export class SolutionService {
   private suiClient: SuiClient;
   private keypair: Ed25519Keypair;
-  private clientSDK: IntenusProtocolClient;
 
   constructor() {
     // Initialize Sui client
@@ -28,34 +26,43 @@ export class SolutionService {
     // Initialize keypair from private key
     this.keypair = config.signer;
 
-    this.clientSDK = new IntenusProtocolClient({
-      network: config.sui.network as 'testnet' | 'mainnet',
-    })
-
     console.log(`Solution service initialized for solver: ${this.keypair.getPublicKey().toSuiAddress()}`);
   }
 
   /**
    * Submit a solution to the Intenus protocol
+   *
+   * The solution contains transaction bytes that the USER will execute.
+   * We submit this solution to Intenus protocol so it can be matched with the intent.
    */
   async submitSolution(solution: IGSSolution, intentId: string): Promise<string> {
     try {
       console.log(`📤 Submitting solution for intent: ${intentId}`);
+      console.log(`  Solver address: ${solution.solver_address}`);
       console.log(`  Transaction bytes length: ${solution.tx_bytes.length} bytes`);
 
       // Step 1: Store solution data to Walrus
+      console.log(`  📦 Storing solution to Walrus...`);
       const solutionBlobId = await storeSolutionToWalrus(solution);
+      console.log(`  ✅ Solution blob ID: ${solutionBlobId}`);
 
-      console.log(`  📦 Solution blob ID: ${solutionBlobId}`);
+      // Step 2: Build and submit solution transaction to Intenus
+      console.log(`  📤 Submitting to Intenus protocol...`);
+      const transaction = new Transaction();
 
-      // Step 2: Build solution submission transaction
-      const transaction = await this.buildSolutionTransaction(
-        intentId,
-        solutionBlobId,
-        solution
-      );
+      // Call Intenus protocol contract to submit solution
+      transaction.moveCall({
+        target: `${config.intenus.packageId}::solver::submit_solution`,
+        arguments: [
+          transaction.pure.string(intentId),
+          transaction.pure.string(solutionBlobId),
+          transaction.pure.address(solution.solver_address),
+        ],
+      });
 
-      // Step 3: Sign and execute transaction
+      transaction.setGasBudget(10000000); // 0.01 SUI
+
+      // Sign and execute the submission transaction
       const result = await this.suiClient.signAndExecuteTransaction({
         signer: this.keypair,
         transaction,
@@ -68,6 +75,8 @@ export class SolutionService {
       if (result.effects?.status?.status === 'success') {
         console.log(`✅ Solution submitted successfully!`);
         console.log(`  Transaction: ${result.digest}`);
+        console.log(`  Intent ID: ${intentId}`);
+        console.log(`  Solution Blob ID: ${solutionBlobId}`);
         return result.digest;
       } else {
         throw new Error(`Transaction failed: ${result.effects?.status?.error}`);
@@ -76,87 +85,6 @@ export class SolutionService {
       console.error('❌ Error submitting solution:', error);
       throw error;
     }
-  }
-
-  /**
-   * Build solution transaction using appropriate SDK
-   */
-  private async buildSolutionTransaction(
-    intentId: string,
-    solutionBlobId: string,
-    solution: IGSSolution
-  ): Promise<Transaction> {
-    try {
-      // Build solution using manual transaction for now
-      // TODO: Implement with actual Intenus SDK when available
-      const transaction = new Transaction();
-      
-      // Manual move call to submit solution
-      transaction.moveCall({
-        target: `${config.intenus.packageId}::solver::submit_solution`,
-        arguments: [
-          transaction.pure.string(intentId),
-          transaction.pure.string(solutionBlobId),
-          transaction.pure.address(this.getSolverAddress()),
-        ],
-      });
-
-      transaction.setGasBudget(10000000); // 0.01 SUI
-
-      return transaction;
-    } catch (error) {
-      console.error('Error building solution transaction:', error);
-      
-      // Fallback: Use Client SDK if Solver SDK fails
-      console.log('🔄 Falling back to Client SDK...');
-      return this.buildFallbackTransaction(intentId, solutionBlobId, solution);
-    }
-  }
-
-  /**
-   * Fallback transaction builder using Client SDK
-   */
-  private async buildFallbackTransaction(
-    intentId: string,
-    solutionBlobId: string,
-    solution: IGSSolution
-  ): Promise<Transaction> {
-    try {
-      // Use manual transaction building as fallback
-      return this.buildManualTransaction(intentId, solutionBlobId, solution);
-    } catch (error) {
-      console.error('Error building fallback transaction:', error);
-      
-      // Last resort: Manual transaction building
-      console.log('🔄 Building manual transaction...');
-      return this.buildManualTransaction(intentId, solutionBlobId, solution);
-    }
-  }
-
-  /**
-   * Manual transaction builder as last resort
-   */
-  private async buildManualTransaction(
-    intentId: string,
-    solutionBlobId: string,
-    solution: IGSSolution
-  ): Promise<Transaction> {
-    const transaction = new Transaction();
-
-    // Manual move call to submit solution
-    // This is a placeholder - you'll need to adjust based on actual Intenus contract interface
-    transaction.moveCall({
-      target: `${config.intenus.packageId}::solver::submit_solution`,
-      arguments: [
-        transaction.pure.string(intentId),
-        transaction.pure.string(solutionBlobId),
-        transaction.pure.address(solution.solver_address),
-      ],
-    });
-
-    transaction.setGasBudget(10000000); // 0.01 SUI
-
-    return transaction;
   }
 
   /**
