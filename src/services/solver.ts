@@ -1,6 +1,9 @@
+import { IGSSolution } from '@intenus/common';
 import { config } from '../config';
-import { IntentSubmittedEvent, SwapIntent, Solution, SwapRoute } from '../types/intent';
-import { fetchIntentFromWalrus, storeSolutionToWalrus } from '../utils/walrus';
+import { IntentSubmittedEvent, SwapIntent } from '../types/intent';
+import { fetchIntentFromWalrus } from '../utils/walrus';
+import { CetusService } from './cetusService';
+import { SolutionService } from './solutionService';
 
 /**
  * SimpleSolver processes swap intents and generates solutions
@@ -8,9 +11,12 @@ import { fetchIntentFromWalrus, storeSolutionToWalrus } from '../utils/walrus';
  */
 export class SimpleSolver {
   private processedIntents: Set<string> = new Set();
+  private cetusService: CetusService;
+  private solutionService: SolutionService;
 
   constructor() {
-    console.log(`Initializing ${config.solver.name}...`);
+    this.cetusService = new CetusService();
+    this.solutionService = new SolutionService();
   }
 
   /**
@@ -58,7 +64,7 @@ export class SimpleSolver {
       }
 
       // Step 3: Submit solution
-      await this.submitSolution(solution);
+      await this.submitSolution(solution, intentId);
 
       // Mark as processed
       this.processedIntents.add(intentId);
@@ -70,96 +76,87 @@ export class SimpleSolver {
   }
 
   /**
-   * Find the best swap route for the intent
-   * This is a simplified version - in production, you would:
-   * 1. Query multiple DEXs (Cetus, Turbos, etc.)
-   * 2. Calculate optimal routes
-   * 3. Consider gas costs and profitability
+   * Find the best swap route and build transaction bytes using Cetus Protocol
    */
-  private async findBestRoute(intent: SwapIntent): Promise<Solution | null> {
-    console.log('\n🔍 Finding best swap route...');
+  private async findBestRoute(intent: SwapIntent): Promise<IGSSolution | null> {
+    console.log('\n🔍 Finding best swap route and building transaction bytes using Cetus...');
 
-    // Simulate route finding
-    // In a real solver, you would:
-    // - Query Cetus pools via their SDK
-    // - Check other DEXs (Turbos, Aftermath, etc.)
-    // - Calculate gas costs
-    // - Optimize for best execution
+    try {
+      // Build swap transaction bytes using Cetus Aggregator
+      const swapTx = await this.cetusService.buildSwapTransactionBytes(
+        intent.tokenIn,
+        intent.tokenOut,
+        intent.amountIn,
+        intent.slippage
+      );
 
-    const route: SwapRoute[] = [
-      {
-        protocol: 'Cetus',
-        poolId: '0x1234...example_pool', // Placeholder pool ID
-        tokenIn: intent.tokenIn,
-        tokenOut: intent.tokenOut,
-        amountIn: intent.amountIn,
-        expectedOut: (BigInt(intent.minAmountOut) * BigInt(102) / BigInt(100)).toString(), // 2% better than minimum
-      },
-    ];
+      if (!swapTx) {
+        console.log('❌ Failed to build swap transaction');
+        return null;
+      }
 
-    const expectedOutput = route[route.length - 1].expectedOut;
+      const expectedOutput = swapTx.quote.amountOut;
 
-    // Check if route meets minimum output requirement
-    if (BigInt(expectedOutput) < BigInt(intent.minAmountOut)) {
-      console.log('❌ Route does not meet minimum output requirement');
+      // Check if route meets minimum output requirement
+      if (BigInt(expectedOutput) < BigInt(intent.minAmountOut)) {
+        console.log('❌ Route does not meet minimum output requirement');
+        console.log(`  Expected: ${expectedOutput}`);
+        console.log(`  Minimum required: ${intent.minAmountOut}`);
+        return null;
+      }
+
+      // Calculate profit
+      const profit = BigInt(expectedOutput) - BigInt(intent.minAmountOut);
+      const profitPercent = Number(profit * BigInt(10000) / BigInt(intent.minAmountOut)) / 100;
+
+      console.log(`📊 Route analysis:`);
+      console.log(`  Protocol: ${swapTx.quote.route[0].protocol}`);
+      console.log(`  Pool: ${swapTx.poolId}`);
+      console.log(`  Expected output: ${expectedOutput}`);
+      console.log(`  Minimum required: ${intent.minAmountOut}`);
+      console.log(`  Profit: ${profitPercent.toFixed(4)}%`);
+      console.log(`  Price impact: ${swapTx.quote.priceImpact.toFixed(4)}%`);
+      console.log(`  Fee: ${swapTx.quote.feeAmount}`);
+      console.log(`  Transaction bytes: ${swapTx.txBytes.length} bytes`);
+
+      // Check price impact (reject if too high)
+      const maxPriceImpact = 5.0; // 5% max price impact
+      if (swapTx.quote.priceImpact > maxPriceImpact) {
+        console.log(`❌ Price impact ${swapTx.quote.priceImpact.toFixed(4)}% too high (max: ${maxPriceImpact}%)`);
+        return null;
+      }
+
+      console.log('✅ Profitable route found and transaction bytes built!');
+
+      // Return IGSSolution with transaction bytes
+      return {
+        solver_address: this.solutionService.getSolverAddress(),
+        tx_bytes: swapTx.txBytes,
+      };
+    } catch (error) {
+      console.error('Error finding route and building transaction:', error);
       return null;
     }
-
-    // Calculate profit (simplified)
-    const profit = (BigInt(expectedOutput) - BigInt(intent.minAmountOut)) / BigInt(intent.minAmountOut);
-    const profitPercent = Number(profit) / 100;
-
-    console.log(`📊 Route analysis:`);
-    console.log(`  Protocol: ${route[0].protocol}`);
-    console.log(`  Expected output: ${expectedOutput}`);
-    console.log(`  Profit: ${profitPercent.toFixed(4)}%`);
-
-    if (profitPercent < config.solver.minProfit) {
-      console.log(`❌ Profit ${profitPercent.toFixed(4)}% below minimum ${config.solver.minProfit}%`);
-      return null;
-    }
-
-    console.log('✅ Profitable route found!');
-
-    return {
-      intentId: intent.intentId,
-      solverId: config.solver.publicKey,
-      route,
-      expectedOutput,
-      gasEstimate: '1000000', // 0.001 SUI gas estimate
-    };
   }
 
   /**
    * Submit the solution to the Intenus protocol
-   * This uses the @intenus/solver-sdk to submit
    */
-  private async submitSolution(solution: Solution): Promise<void> {
+  private async submitSolution(solution: IGSSolution, intentId: string): Promise<void> {
     console.log('\n📤 Submitting solution...');
 
     try {
-      // Step 1: Store solution data to Walrus
-      const solutionBlobId = await storeSolutionToWalrus({
-        route: solution.route,
-        expectedOutput: solution.expectedOutput,
-        timestamp: Date.now(),
-      });
-
-      console.log(`  Solution blob ID: ${solutionBlobId}`);
-
-      // Step 2: Submit solution to protocol
-      // TODO: Use @intenus/solver-sdk to submit
-      // const solutionBuilder = new SolutionBuilder();
-      // const tx = await solutionBuilder
-      //   .intentId(solution.intentId)
-      //   .solutionBlob(solutionBlobId)
-      //   .submit();
-
-      console.log('  📝 Solution submitted (placeholder - implement SDK call)');
-      console.log(`  Solution ID: solution_${Date.now()}`);
+      // Submit using SolutionService
+      const txDigest = await this.solutionService.submitSolution(solution, intentId);
+      
+      console.log(`✅ Solution submitted successfully!`);
+      console.log(`  Transaction: ${txDigest}`);
+      console.log(`  Intent ID: ${intentId}`);
+      console.log(`  Solver: ${solution.solver_address}`);
+      console.log(`  Transaction bytes: ${solution.tx_bytes.length} bytes`);
 
     } catch (error) {
-      console.error('Error submitting solution:', error);
+      console.error('❌ Error submitting solution:', error);
       throw error;
     }
   }
@@ -167,11 +164,13 @@ export class SimpleSolver {
   /**
    * Get solver statistics
    */
-  getStats() {
+  async getStats() {
+    const solutionStats = await this.solutionService.getStats();
+    
     return {
       processedIntents: this.processedIntents.size,
-      solverName: config.solver.name,
-      minProfit: config.solver.minProfit,
+      cetusStats: this.cetusService.getStats(),
+      solutionStats,
     };
   }
 }

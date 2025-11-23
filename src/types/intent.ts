@@ -37,14 +37,6 @@ export interface SwapIntent {
   deadline: number;
 }
 
-export interface Solution {
-  intentId: string;
-  solverId: string;
-  route: SwapRoute[];
-  expectedOutput: string;
-  gasEstimate: string;
-}
-
 export interface SwapRoute {
   protocol: string;
   poolId: string;

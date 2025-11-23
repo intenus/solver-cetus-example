@@ -1,294 +1,219 @@
-# Intenus Simple Swap Solver
+# Intenus Cetus Solver Example
 
-Một solver đơn giản cho Intenus protocol trên Sui testnet, dùng để xử lý swap intents.
+Một solver đơn giản cho Intenus protocol sử dụng Cetus Protocol để xử lý swap intents trên Sui blockchain.
 
 ## Tính năng
 
-- ✅ Lắng nghe `IntentSubmitted` events qua GraphQL polling
-- ✅ Lấy intent data từ Walrus storage
-- ✅ Tìm route tối ưu cho swap (demo với Cetus)
-- ✅ Submit solution về Intenus protocol
-- ✅ Express API server để monitor
-- ✅ TypeScript với type safety đầy đủ
+- 🔍 **Event Listening**: Lắng nghe IntentSubmitted events từ Intenus protocol
+- 🌊 **Cetus Integration**: Tích hợp Cetus CLMM SDK để tìm best swap routes
+- 💰 **Profitability Check**: Kiểm tra lợi nhuận và price impact trước khi submit
+- 📦 **Walrus Storage**: Sử dụng Walrus để store/fetch intent và solution data
+- 🚀 **Auto Submission**: Tự động submit solutions sử dụng Intenus SDK
 
 ## Kiến trúc
 
 ```
-┌─────────────┐
-│ Sui Network │
-│  (testnet)  │
-└──────┬──────┘
-       │ GraphQL polling
-       │ (IntentSubmitted events)
-       ↓
-┌──────────────────┐
-│  EventListener   │
-└────────┬─────────┘
-         │
-         ↓
-┌──────────────────┐      ┌──────────────┐
-│   SimpleSolver   │─────→│    Walrus    │
-└────────┬─────────┘      │   Storage    │
-         │                └──────────────┘
-         │ Submit solution
-         ↓
-┌─────────────────┐
-│ Intenus Protocol│
-└─────────────────┘
+src/
+├── config.ts              # Configuration và environment variables
+├── index.ts               # Entry point
+├── server.ts              # Express server với monitoring endpoints
+├── services/
+│   ├── eventListener.ts   # GraphQL polling cho IntentSubmitted events
+│   ├── solver.ts          # Main solver logic
+│   ├── cetusService.ts    # Cetus Protocol integration
+│   └── solutionService.ts # Solution submission với Intenus SDK
+├── types/
+│   └── intent.ts          # Type definitions
+└── utils/
+    └── walrus.ts          # Walrus storage utilities
 ```
-
-## Yêu cầu
-
-- Node.js v18 hoặc cao hơn
-- pnpm (hoặc npm/yarn)
-- Sui wallet với testnet SUI tokens
-- Private key và public key của solver
 
 ## Cài đặt
 
-1. Clone repository:
-```bash
-git clone <your-repo-url>
-cd solver-cetus-example
-```
+1. **Clone và install dependencies:**
+   ```bash
+   npm install
+   ```
 
-2. Cài đặt dependencies:
-```bash
-pnpm install
-# hoặc
-npm install
-```
+2. **Cấu hình environment variables:**
+   Tạo file `.env` từ `.env.example`:
+   ```bash
+   # Sui Network Configuration
+   SUI_NETWORK=testnet
+   SUI_GRAPHQL_URL=https://graphql.testnet.sui.io/graphql
+   SUI_RPC_URL=https://fullnode.testnet.sui.io:443
 
-3. Tạo file `.env` từ template:
-```bash
-cp .env.example .env
-```
+   # Solver Configuration
+   SOLVER_PRIVATE_KEY=your_private_key_here
+   SOLVER_PUBLIC_KEY=your_public_key_here
+   SOLVER_NAME=CetusSwapSolver
+   SOLVER_MIN_PROFIT=0.001
 
-4. Cấu hình `.env` với thông tin của bạn:
-```env
-# Wallet configuration - QUAN TRỌNG!
-SOLVER_PRIVATE_KEY=your_private_key_here
-SOLVER_PUBLIC_KEY=your_public_key_here
+   # Intenus Protocol Configuration
+   INTENUS_PACKAGE_ID=0x993c7635b44582e9c47c589c759239d3e1ce787811af5bfa0056aa253caa394a
 
-# Các config khác có thể giữ nguyên default
-```
+   # Server Configuration
+   PORT=3000
+
+   # Polling Configuration
+   EVENT_POLL_INTERVAL=5000
+   ```
+
+3. **Generate keypair (nếu chưa có):**
+   ```bash
+   # Sử dụng Sui CLI
+   sui keytool generate ed25519
+   ```
 
 ## Chạy Solver
 
-### Development mode
+### Development mode:
 ```bash
-pnpm dev
-# hoặc
 npm run dev
 ```
 
-### Production mode
+### Production mode:
 ```bash
-# Build
-pnpm build
-
-# Run
-pnpm start
+npm run build
+npm start
 ```
 
 ## API Endpoints
 
-Solver cung cấp các HTTP endpoints để monitor:
+Solver cung cấp các monitoring endpoints:
 
-### Health Check
-```bash
-GET http://localhost:3000/health
-```
-
-Response:
-```json
-{
-  "status": "ok",
-  "timestamp": "2025-11-23T...",
-  "solver": "SimpleSwapSolver"
-}
-```
-
-### Solver Status
-```bash
-GET http://localhost:3000/status
-```
-
-Response:
-```json
-{
-  "listener": {
-    "isRunning": true,
-    "lastProcessedCursor": "..."
-  },
-  "solver": {
-    "processedIntents": 5,
-    "solverName": "SimpleSwapSolver",
-    "minProfit": 0.001
-  },
-  "config": {
-    "network": "testnet",
-    "packageId": "0x993c...",
-    "pollInterval": 5000
-  }
-}
-```
-
-### Statistics
-```bash
-GET http://localhost:3000/stats
-```
+- `GET /health` - Health check
+- `GET /status` - Detailed status (listener, solver, config)
+- `GET /stats` - Solver statistics
+- `POST /test/process-intent` - Manual intent processing (for testing)
 
 ## Cách hoạt động
 
-### 1. Event Listener
-Solver sử dụng GraphQL để poll events từ Sui network:
-- Query `IntentSubmitted` events từ Intenus package
-- Poll mỗi 5 giây (có thể config trong `.env`)
-- Lưu cursor để tránh xử lý trùng
+1. **Event Listening**: Solver liên tục poll GraphQL endpoint để tìm IntentSubmitted events mới
+2. **Intent Processing**: Khi có intent mới:
+   - Fetch intent data từ Walrus storage
+   - Parse swap parameters (tokenIn, tokenOut, amountIn, minAmountOut)
+3. **Route Finding**: Sử dụng Cetus SDK để:
+   - Tìm pools phù hợp
+   - Calculate best swap route
+   - Kiểm tra slippage và price impact
+4. **Profitability Check**: Đảm bảo profit >= minimum threshold
+5. **Solution Submission**: 
+   - Store solution data to Walrus
+   - Submit solution transaction sử dụng Intenus SDK
 
-### 2. Intent Processing
-Khi nhận được intent mới:
-1. Fetch intent data từ Walrus storage (via blob ID)
-2. Parse swap parameters (tokenIn, tokenOut, amount, slippage, etc.)
-3. Tìm route tối ưu
+## Cetus Integration
 
-### 3. Route Finding
-Solver tìm route tốt nhất:
-- Check các DEX pools (Cetus trong demo này)
-- Tính toán expected output
-- So sánh với minimum output requirement
-- Tính profit và gas costs
+Solver sử dụng `@cetusprotocol/sui-clmm-sdk` để:
 
-### 4. Solution Submission
-Nếu tìm được route profitable:
-1. Store solution data lên Walrus
-2. Submit solution transaction lên Intenus protocol
-3. Đợi user select và execute
+- **Pool Discovery**: Tìm pools hỗ trợ token pair
+- **Price Calculation**: Sử dụng `preSwap` để calculate expected output
+- **Slippage Protection**: Apply slippage tolerance
+- **Price Impact**: Calculate và kiểm tra price impact
 
-## Cấu trúc Code
+### Supported Features:
+- ✅ Direct swaps (A → B)
+- ✅ Slippage protection
+- ✅ Price impact calculation
+- ✅ Pool liquidity checking
+- 🚧 Multi-hop routes (future)
+- 🚧 Multiple DEX aggregation (future)
 
-```
-src/
-├── index.ts              # Entry point
-├── server.ts             # Express server
-├── config.ts             # Configuration loader
-├── services/
-│   ├── eventListener.ts  # GraphQL event polling
-│   └── solver.ts         # Solver logic
-├── types/
-│   └── intent.ts         # TypeScript types
-└── utils/
-    └── walrus.ts         # Walrus storage helpers
-```
+## Constraints và Validation
 
-## Customization
+Solver áp dụng các constraints sau:
 
-### Thay đổi poll interval
-Trong `.env`:
-```env
-EVENT_POLL_INTERVAL=3000  # 3 seconds
-```
+- **Minimum Profit**: Configurable minimum profit percentage
+- **Price Impact**: Maximum 5% price impact
+- **Slippage**: Respects intent slippage tolerance
+- **Deadline**: Kiểm tra intent deadline
+- **Liquidity**: Đảm bảo pool có đủ liquidity
 
-### Thay đổi minimum profit
-Trong `.env`:
-```env
-SOLVER_MIN_PROFIT=0.005  # 0.5%
-```
+## Monitoring
 
-### Thêm logic routing
-Edit `src/services/solver.ts` → `findBestRoute()` method:
-```typescript
-private async findBestRoute(intent: SwapIntent): Promise<Solution | null> {
-  // Thêm logic của bạn ở đây
-  // - Query nhiều DEX
-  // - Tính optimal route
-  // - Consider gas costs
-}
-```
+### Logs
+Solver cung cấp detailed logging cho:
+- Intent processing
+- Route finding
+- Solution submission
+- Error handling
 
-## Development Notes
+### Metrics
+- Processed intents count
+- Success/failure rates
+- Pool cache statistics
+- Solver balance
 
-### Placeholders
-Code này là demo version với một số placeholders:
+## Development
 
-1. **Walrus Integration**: `src/utils/walrus.ts`
-   - Cần implement với `@intenus/walrus` SDK
-   - Hiện tại return mock data
-
-2. **Solution Submission**: `src/services/solver.ts`
-   - Cần implement với `@intenus/solver-sdk`
-   - Hiện tại chỉ log ra console
-
-3. **Route Finding**: `src/services/solver.ts`
-   - Cần integrate với Cetus SDK thực
-   - Hiện tại dùng hardcoded route
-
-### Next Steps để Production-Ready
-
-1. **Integrate Walrus SDK**:
-```typescript
-import { IntenusWalrusClient } from '@intenus/walrus';
-const walrusClient = new IntenusWalrusClient({...});
+### Testing
+```bash
+# Test manual intent processing
+curl -X POST http://localhost:3000/test/process-intent \\
+  -H "Content-Type: application/json" \\
+  -d '{"event": {...}}'
 ```
 
-2. **Integrate Solver SDK**:
-```typescript
-import { SolutionBuilder } from '@intenus/solver-sdk';
-const solution = new SolutionBuilder()
-  .intentId(intentId)
-  .solutionBlob(blobId)
-  .submit();
-```
-
-3. **Integrate Cetus SDK**:
-```typescript
-import { CetusClmmSDK } from '@cetusprotocol/cetus-sui-clmm-sdk';
-const sdk = new CetusClmmSDK({...});
-const pools = await sdk.Pool.getPools();
-```
-
-4. **Add Error Handling**:
-   - Retry logic cho network failures
-   - Dead letter queue cho failed intents
-   - Alerting cho critical errors
-
-5. **Add Monitoring**:
-   - Prometheus metrics
-   - Logging với structured logs
-   - Performance tracking
-
-6. **Security**:
-   - Secure key management (không commit .env)
-   - Rate limiting
-   - Input validation
+### Debugging
+- Set `EVENT_POLL_INTERVAL=1000` cho faster testing
+- Check `/status` endpoint cho detailed diagnostics
+- Monitor console logs cho real-time processing
 
 ## Troubleshooting
 
-### Solver không nhận được events
-- Check GraphQL endpoint có hoạt động không: `https://graphql.testnet.sui.io/graphql`
-- Verify package ID đúng
-- Check logs xem có error gì không
+### Common Issues:
 
-### Không thể submit solution
-- Verify private key đúng format
-- Check wallet có đủ SUI tokens không
-- Check solver đã register với protocol chưa
+1. **"No pools found"**: 
+   - Kiểm tra token addresses
+   - Đảm bảo tokens có pools trên Cetus
 
-### Build errors
-```bash
-# Clean và rebuild
-pnpm clean
-pnpm build
-```
+2. **"Configuration validation failed"**:
+   - Kiểm tra `.env` file
+   - Đảm bảo private key format đúng
+
+3. **"Error fetching from Walrus"**:
+   - Solver sẽ fallback to mock data cho demo
+   - Kiểm tra Walrus client configuration
+
+4. **"Transaction failed"**:
+   - Kiểm tra solver balance
+   - Verify Intenus package ID
+   - Check network connectivity
+
+## Architecture Notes
+
+### Event Listening Strategy
+- Sử dụng GraphQL polling (subscriptions chưa support trên Sui)
+- Cursor-based pagination để avoid duplicate processing
+- Configurable poll interval
+
+### Caching Strategy
+- Pool data cached 1 minute
+- Token metadata cached
+- Intent processing deduplication
+
+### Error Handling
+- Graceful degradation với mock data
+- Retry logic cho network calls
+- Comprehensive error logging
+
+## Future Enhancements
+
+- [ ] Multi-hop routing
+- [ ] Multiple DEX aggregation (Turbos, Aftermath)
+- [ ] Advanced MEV protection
+- [ ] Dynamic gas estimation
+- [ ] Performance metrics dashboard
+- [ ] WebSocket event streaming
+- [ ] Intent batching optimization
+
+## Contributing
+
+1. Fork repository
+2. Create feature branch
+3. Implement changes với proper testing
+4. Submit pull request
 
 ## License
 
-MIT
-
-## Resources
-
-- [Intenus SDK](https://github.com/intenus/sdks)
-- [Intenus Contracts](https://github.com/intenus/contracts)
-- [Sui GraphQL Docs](https://docs.sui.io/guides/developer/advanced/graphql-rpc)
-- [Cetus Developer Docs](https://cetus-1.gitbook.io/cetus-developer-docs)
+MIT License - see LICENSE file for details.
