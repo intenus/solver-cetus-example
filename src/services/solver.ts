@@ -39,11 +39,22 @@ export class SimpleSolver {
     console.log(`${'='.repeat(60)}\n`);
 
     try {
-      // Step 1: Fetch intent data from Walrus
+      // Step 1: Fetch intent data from Walrus (includes user address in IGS format)
       const intentData = await fetchIntentFromWalrus(event.parsedJson.blob_id);
+
+      // Determine submitter address (prefer from IGS intent, fallback to event)
+      const submitter = intentData.userAddress || event.parsedJson.submitter;
+
+      if (!submitter) {
+        console.error(`❌ Missing submitter/user address in both intent and event`);
+        console.log(`Event data:`, JSON.stringify(event.parsedJson, null, 2));
+        console.log(`Intent data:`, JSON.stringify(intentData, null, 2));
+        throw new Error('User address is required (not found in intent or event)');
+      }
+
       const swapIntent: SwapIntent = {
         intentId,
-        submitter: event.parsedJson.submitter,
+        submitter,
         blobId: event.parsedJson.blob_id,
         ...intentData,
       };
