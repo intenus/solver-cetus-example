@@ -1,19 +1,37 @@
-import { GraphQLClient, gql } from 'graphql-request';
+import { SuiClient, SuiEvent, SuiEventFilter, EventId } from '@mysten/sui/client';
 import { config } from '../config';
 import { IntentSubmittedEvent } from '../types/intent';
 
+type SuiEventsCursor = EventId | null | undefined;
+
+type EventExecutionResult = {
+  cursor: SuiEventsCursor;
+  hasNextPage: boolean;
+};
+
 /**
- * EventListener listens for IntentSubmitted events using GraphQL polling
- * Note: GraphQL subscriptions are not yet supported on Sui, so we use polling
+ * EventListener listens for IntentSubmitted events using Sui Client polling
+ * Based on official Sui documentation pattern
  */
 export class EventListener {
-  private client: GraphQLClient;
-  private lastProcessedCursor: string | null = null;
+  private client: SuiClient;
+  private lastProcessedCursor: SuiEventsCursor = null;
   private isRunning = false;
   private pollInterval: NodeJS.Timeout | null = null;
+  private eventFilter: SuiEventFilter;
 
   constructor() {
-    this.client = new GraphQLClient(config.sui.graphqlUrl);
+    this.client = new SuiClient({
+      url: config.sui.rpcUrl,
+    });
+
+    // Set up event filter for IntentSubmitted events
+    this.eventFilter = {
+      MoveEventModule: {
+        module: 'registry',
+        package: config.intenus.packageId,
+      },
+    };
   }
 
   /**
@@ -28,17 +46,8 @@ export class EventListener {
     this.isRunning = true;
     console.log(`Starting event listener (polling every ${config.polling.eventPollInterval}ms)...`);
 
-    // Initial fetch
-    await this.pollEvents(onEvent);
-
-    // Set up polling interval
-    this.pollInterval = setInterval(async () => {
-      try {
-        await this.pollEvents(onEvent);
-      } catch (error) {
-        console.error('Error polling events:', error);
-      }
-    }, config.polling.eventPollInterval);
+    // Start the event polling loop
+    this.runEventJob(onEvent);
   }
 
   /**
@@ -54,104 +63,86 @@ export class EventListener {
   }
 
   /**
-   * Poll for new events using GraphQL query
+   * Execute event polling job using Sui Client
    */
-  private async pollEvents(onEvent: (event: IntentSubmittedEvent) => Promise<void>) {
+  private async executeEventJob(onEvent: (event: IntentSubmittedEvent) => Promise<void>): Promise<EventExecutionResult> {
     try {
-      const query = gql`
-        query GetIntentEvents($packageId: SuiAddress!, $after: String) {
-          events(
-            filter: {
-              emittingPackage: $packageId
-              eventType: "IntentSubmitted"
-            }
-            after: $after
-            first: 50
-          ) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              sendingModule {
-                package {
-                  address
-                }
-                name
-              }
-              sender {
-                address
-              }
-              type {
-                repr
-              }
-              json
-              bcs
-              timestamp
-            }
-          }
-        }
-      `;
+      console.log(`📡 Polling for IntentSubmitted events...`);
 
-      const variables = {
-        packageId: config.intenus.packageId,
-        after: this.lastProcessedCursor,
-      };
+      // Query events from Sui network using client
+      const { data, hasNextPage, nextCursor } = await this.client.queryEvents({
+        query: this.eventFilter,
+        cursor: this.lastProcessedCursor,
+        order: 'ascending',
+        limit: 50,
+      });
 
-      const data: any = await this.client.request(query, variables);
-
-      if (data.events && data.events.nodes) {
-        const events = data.events.nodes;
-
-        for (const event of events) {
-          // Parse and process each event
-          const intentEvent = this.parseEvent(event);
-          if (intentEvent) {
-            await onEvent(intentEvent);
-          }
-        }
-
-        // Update cursor for next poll
-        if (data.events.pageInfo.endCursor) {
-          this.lastProcessedCursor = data.events.pageInfo.endCursor;
-        }
-
-        if (events.length > 0) {
-          console.log(`Processed ${events.length} new events`);
+      // Process each event
+      for (const event of data) {
+        const intentEvent = this.parseEvent(event);
+        if (intentEvent) {
+          await onEvent(intentEvent);
         }
       }
+
+      // Update cursor if we got new data
+      if (nextCursor && data.length > 0) {
+        this.lastProcessedCursor = nextCursor;
+        console.log(`✅ Processed ${data.length} new events`);
+      }
+
+      return {
+        cursor: nextCursor,
+        hasNextPage,
+      };
     } catch (error) {
-      console.error('Error fetching events from GraphQL:', error);
-      throw error;
+      console.error('Error fetching events from Sui:', error);
+      return {
+        cursor: this.lastProcessedCursor,
+        hasNextPage: false,
+      };
     }
   }
 
   /**
-   * Parse raw GraphQL event into IntentSubmittedEvent
+   * Run event polling job with automatic retry
    */
-  private parseEvent(rawEvent: any): IntentSubmittedEvent | null {
+  private async runEventJob(onEvent: (event: IntentSubmittedEvent) => Promise<void>) {
+    if (!this.isRunning) return;
+
+    const result = await this.executeEventJob(onEvent);
+
+    // Schedule next poll - immediate if there are more pages, otherwise wait for interval
+    setTimeout(
+      () => {
+        this.runEventJob(onEvent);
+      },
+      result.hasNextPage ? 0 : config.polling.eventPollInterval,
+    );
+  }
+
+  /**
+   * Parse Sui event into IntentSubmittedEvent
+   */
+  private parseEvent(rawEvent: SuiEvent): IntentSubmittedEvent | null {
     try {
       // Check if this is an IntentSubmitted event
-      if (!rawEvent.type?.repr?.includes('IntentSubmitted')) {
+      if (!rawEvent.type.includes('IntentSubmitted')) {
         return null;
       }
 
-      const parsedJson = typeof rawEvent.json === 'string'
-        ? JSON.parse(rawEvent.json)
-        : rawEvent.json;
-
       return {
         id: {
-          txDigest: rawEvent.txDigest || '',
-          eventSeq: rawEvent.eventSeq || '0',
+          txDigest: rawEvent.id.txDigest,
+          eventSeq: rawEvent.id.eventSeq,
         },
-        packageId: rawEvent.sendingModule?.package?.address || config.intenus.packageId,
-        transactionModule: rawEvent.sendingModule?.name || 'registry',
-        sender: rawEvent.sender?.address || '',
-        type: rawEvent.type?.repr || '',
-        parsedJson: parsedJson,
-        bcs: rawEvent.bcs || '',
-        timestampMs: rawEvent.timestamp || '',
+        packageId: rawEvent.packageId,
+        transactionModule: rawEvent.transactionModule,
+        sender: rawEvent.sender,
+        type: rawEvent.type,
+        parsedJson: rawEvent.parsedJson as any,
+        bcs: rawEvent.bcs,
+        timestampMs: rawEvent.timestampMs || '',
       };
     } catch (error) {
       console.error('Error parsing event:', error);
@@ -166,6 +157,7 @@ export class EventListener {
     return {
       isRunning: this.isRunning,
       lastProcessedCursor: this.lastProcessedCursor,
+      eventFilter: this.eventFilter,
     };
   }
 }

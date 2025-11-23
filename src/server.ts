@@ -1,7 +1,7 @@
-import express, { Request, Response } from 'express';
-import { config } from './config';
-import { EventListener } from './services/eventListener';
-import { SimpleSolver } from './services/solver';
+import express, { Request, Response } from "express";
+import { config } from "./config";
+import { EventListener } from "./services/eventListener";
+import { SimpleSolver } from "./services/solver";
 
 export class SolverServer {
   private app: express.Application;
@@ -30,54 +30,65 @@ export class SolverServer {
 
   private setupRoutes() {
     // Health check endpoint
-    this.app.get('/health', (_req: Request, res: Response) => {
+    this.app.get("/health", (_req: Request, res: Response) => {
       res.json({
-        status: 'ok',
+        status: "ok",
         timestamp: new Date().toISOString(),
-        solver: config.solver.name,
       });
     });
 
     // Solver status endpoint
-    this.app.get('/status', (_req: Request, res: Response) => {
-      const listenerStatus = this.eventListener.getStatus();
-      const solverStats = this.solver.getStats();
-
-      res.json({
-        listener: listenerStatus,
-        solver: solverStats,
-        config: {
-          network: config.sui.network,
-          packageId: config.intenus.packageId,
-          pollInterval: config.polling.eventPollInterval,
-        },
-      });
-    });
-
-    // Get solver statistics
-    this.app.get('/stats', (_req: Request, res: Response) => {
-      res.json(this.solver.getStats());
-    });
-
-    // Manual trigger for testing (optional)
-    this.app.post('/test/process-intent', async (req: Request, res: Response) => {
+    this.app.get("/status", async (_req: Request, res: Response) => {
       try {
-        const { event } = req.body;
+        const listenerStatus = this.eventListener.getStatus();
+        const solverStats = await this.solver.getStats();
 
-        if (!event) {
-          return res.status(400).json({ error: 'Event data is required' });
-        }
-
-        await this.solver.processIntent(event);
-        res.json({ success: true, message: 'Intent processed' });
+        res.json({
+          listener: listenerStatus,
+          solver: solverStats,
+          config: {
+            network: config.sui.network,
+            packageId: config.intenus.packageId,
+            pollInterval: config.polling.eventPollInterval,
+          },
+        });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
     });
 
+    // Get solver statistics
+    this.app.get("/stats", async (_req: Request, res: Response) => {
+      try {
+        const stats = await this.solver.getStats();
+        res.json(stats);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Manual trigger for testing (optional)
+    this.app.post(
+      "/test/process-intent",
+      async (req: Request, res: Response) => {
+        try {
+          const { event } = req.body;
+
+          if (!event) {
+            return res.status(400).json({ error: "Event data is required" });
+          }
+
+          await this.solver.processIntent(event);
+          res.json({ success: true, message: "Intent processed" });
+        } catch (error: any) {
+          res.status(500).json({ error: error.message });
+        }
+      }
+    );
+
     // 404 handler
     this.app.use((_req: Request, res: Response) => {
-      res.status(404).json({ error: 'Not found' });
+      res.status(404).json({ error: "Not found" });
     });
   }
 
@@ -88,14 +99,13 @@ export class SolverServer {
     return new Promise<void>((resolve) => {
       // Start HTTP server
       this.app.listen(config.server.port, () => {
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`🚀 ${config.solver.name} started!`);
-        console.log(`${'='.repeat(60)}`);
+        console.log(`\n${"=".repeat(60)}`);
+        console.log(`${"=".repeat(60)}`);
         console.log(`📡 Server running on port ${config.server.port}`);
         console.log(`🌐 Network: ${config.sui.network}`);
         console.log(`📦 Package ID: ${config.intenus.packageId}`);
         console.log(`⏱️  Poll interval: ${config.polling.eventPollInterval}ms`);
-        console.log(`${'='.repeat(60)}\n`);
+        console.log(`${"=".repeat(60)}\n`);
 
         // Start event listener
         this.eventListener.start(async (event) => {
@@ -112,6 +122,6 @@ export class SolverServer {
    */
   stop() {
     this.eventListener.stop();
-    console.log('Solver server stopped');
+    console.log("Solver server stopped");
   }
 }
