@@ -1,0 +1,22 @@
+{
+  "id": {
+    "txDigest": "test_tx_digest_123",
+    "eventSeq": "0"
+  },
+  "packageId": "0x993c7635b44582e9c47c589c759239d3e1ce787811af5bfa0056aa253caa394a",
+  "transactionModule": "intent",
+  "sender": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+  "type": "0x993c7635b44582e9c47c589c759239d3e1ce787811af5bfa0056aa253caa394a::intent::IntentSubmitted",
+  "parsedJson": {
+    "intent_id": "test_intent_001",
+    "submitter": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+    "blob_id": "test_blob_id_123",
+    "access_start": "0",
+    "access_end": "9999999999999",
+    "auto_revoke_duration": "600000",
+    "fee": "1000000",
+    "timestamp": "1234567890"
+  },
+  "bcs": "",
+  "timestampMs": "1234567890000"
+}
