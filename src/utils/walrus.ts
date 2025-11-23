@@ -4,7 +4,7 @@
 
 import { IntenusWalrusClient } from "@intenus/walrus";
 import { config } from "../config";
-import { IGSSolution, IGSSolutionSchema } from "@intenus/common";
+import { IGSSolution, IGSSolutionSchema, IGSIntent } from "@intenus/common";
 
 // Initialize Walrus client
 let walrusClient: IntenusWalrusClient | null = null;
@@ -19,9 +19,69 @@ function getWalrusClient(): IntenusWalrusClient {
 }
 
 /**
+ * Parse IGS Intent to simple swap format
+ * Converts IGS (Intenus General Standard) format to our solver's expected format
+ */
+function parseIGSIntent(igsIntent: IGSIntent): any {
+  console.log(`📋 Parsing IGS Intent (version ${igsIntent.igs_version})...`);
+
+  // Extract input and output from operation
+  const input = igsIntent.operation.inputs[0];
+  const output = igsIntent.operation.outputs[0];
+
+  // Get amount from input
+  let amountIn: string;
+  if (input.amount.type === 'exact') {
+    amountIn = input.amount.value;
+  } else if (input.amount.type === 'all') {
+    // For 'all', we'll need to query the user's balance
+    // For now, use a default or throw error
+    throw new Error('Amount type "all" is not yet supported by this solver');
+  } else if (input.amount.type === 'range') {
+    // For range, use the minimum
+    amountIn = input.amount.min;
+  } else {
+    throw new Error(`Unknown amount type: ${(input.amount as any).type}`);
+  }
+
+  // Get minimum output from constraints
+  const minOutput = igsIntent.constraints?.min_outputs?.[0];
+  const minAmountOut = minOutput?.amount || '0';
+
+  // Get slippage from constraints (convert from basis points to decimal)
+  const slippageBps = igsIntent.constraints?.max_slippage_bps || 100; // Default 1%
+  const slippage = slippageBps / 10000; // Convert basis points to decimal
+
+  // Get deadline
+  const deadline = igsIntent.constraints?.deadline_ms || (Date.now() + 600000);
+
+  const parsed = {
+    type: igsIntent.intent_type,
+    tokenIn: input.asset_id,
+    tokenOut: output.asset_id,
+    amountIn,
+    minAmountOut,
+    slippage,
+    deadline,
+    userAddress: igsIntent.user_address,
+  };
+
+  console.log(`✅ Parsed IGS Intent:`, {
+    tokenIn: parsed.tokenIn,
+    tokenOut: parsed.tokenOut,
+    amountIn: parsed.amountIn,
+    minAmountOut: parsed.minAmountOut,
+    slippage: `${slippage * 100}%`,
+    userAddress: parsed.userAddress,
+  });
+
+  return parsed;
+}
+
+/**
  * Fetch intent data from Walrus storage
  * @param blobId - The blob ID to fetch
- * @returns The decoded intent data
+ * @returns The decoded intent data in simple format
  */
 export async function fetchIntentFromWalrus(blobId: string): Promise<any> {
   try {
@@ -36,18 +96,23 @@ export async function fetchIntentFromWalrus(blobId: string): Promise<any> {
       throw new Error("Blob not found");
     }
 
-    // Parse the intent data
-    // The intent should be in a standard format
+    // Parse the intent data (should be IGS format)
     const intentData = JSON.parse(blobData.toString());
 
-    console.log(`✅ Successfully fetched intent data:`, {
-      type: intentData.type,
-      tokenIn: intentData.tokenIn,
-      tokenOut: intentData.tokenOut,
-      amountIn: intentData.amountIn,
-    });
-
-    return intentData;
+    // Check if it's IGS format
+    if (intentData.igs_version) {
+      // Parse IGS format
+      return parseIGSIntent(intentData as IGSIntent);
+    } else {
+      // Legacy simple format
+      console.log(`✅ Successfully fetched intent data (legacy format):`, {
+        type: intentData.type,
+        tokenIn: intentData.tokenIn,
+        tokenOut: intentData.tokenOut,
+        amountIn: intentData.amountIn,
+      });
+      return intentData;
+    }
   } catch (error) {
     console.error(`❌ Error fetching from Walrus:`, error);
 
