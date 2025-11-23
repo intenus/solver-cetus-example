@@ -23,6 +23,7 @@
     "@cetusprotocol/sui-clmm-sdk": "^1.3.0",
     "@intenus/client-sdk": "^2.6.3",
     "@intenus/common": "^2.4.4",
+    "@intenus/seal": "^2.4.0",
     "@intenus/solver-sdk": "^2.3.1",
     "@intenus/walrus": "^2.4.2",
     "@mysten/sui": "^1.45.0",
