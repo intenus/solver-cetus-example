@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  solver:
+    build: .
+    container_name: intenus-solver
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - SUI_NETWORK=${SUI_NETWORK:-testnet}
+      - SUI_GRAPHQL_URL=${SUI_GRAPHQL_URL:-https://graphql.testnet.sui.io/graphql}
+      - SUI_RPC_URL=${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}
+      - SOLVER_PRIVATE_KEY=${SOLVER_PRIVATE_KEY}
+      - SOLVER_PUBLIC_KEY=${SOLVER_PUBLIC_KEY}
+      - INTENUS_PACKAGE_ID=${INTENUS_PACKAGE_ID:-0x993c7635b44582e9c47c589c759239d3e1ce787811af5bfa0056aa253caa394a}
+      - PORT=${PORT:-3000}
+      - EVENT_POLL_INTERVAL=${EVENT_POLL_INTERVAL:-5000}
+      - SOLVER_NAME=${SOLVER_NAME:-SimpleSwapSolver}
+      - SOLVER_MIN_PROFIT=${SOLVER_MIN_PROFIT:-0.001}
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - solver-network
+
+networks:
+  solver-network:
+    driver: bridge
