@@ -67,9 +67,6 @@ export class EventListener {
    */
   private async executeEventJob(onEvent: (event: IntentSubmittedEvent) => Promise<void>): Promise<EventExecutionResult> {
     try {
-      console.log(`📡 Polling for IntentSubmitted events...`);
-
-      // Query events from Sui network using client
       const { data, hasNextPage, nextCursor } = await this.client.queryEvents({
         query: this.eventFilter,
         cursor: this.lastProcessedCursor,
@@ -77,18 +74,27 @@ export class EventListener {
         limit: 50,
       });
 
-      // Process each event
+      if (data.length > 0) {
+        console.log(`[EventListener] Received ${data.length} event(s) from Sui`);
+      }
+
       for (const event of data) {
         const intentEvent = this.parseEvent(event);
         if (intentEvent) {
+          console.log(`[EventListener] IntentSubmitted event received:`, {
+            intent_id: intentEvent.parsedJson.intent_id,
+            submitter: intentEvent.parsedJson.submitter,
+            blob_id: intentEvent.parsedJson.blob_id,
+            fee: intentEvent.parsedJson.fee,
+            tx_digest: intentEvent.id.txDigest,
+            timestamp: intentEvent.timestampMs,
+          });
           await onEvent(intentEvent);
         }
       }
 
-      // Update cursor if we got new data
       if (nextCursor && data.length > 0) {
         this.lastProcessedCursor = nextCursor;
-        console.log(`✅ Processed ${data.length} new events`);
       }
 
       return {
